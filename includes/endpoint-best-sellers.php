@@ -62,7 +62,9 @@ function harriet_get_best_sellers($request) {
         "o.post_status IN ('wc-completed', 'wc-processing')",
         $wpdb->prepare("opl.date_created BETWEEN %s AND %s", $start_date, $end_date),
         "p.post_author IN ({$vendors_ids})",
-        "pm_stock.meta_value != 'outofstock'",
+        // Check stock status on the parent product (not the variation row from opl),
+        // and use IN() so NULL rows (missing meta) are excluded rather than passing through.
+        "pm_stock.meta_value IN ('instock', 'onbackorder')",
     );
 
     if ($vendor_id && in_array($vendor_id, $enabled_vendors)) {
@@ -77,7 +79,9 @@ function harriet_get_best_sellers($request) {
         FROM {$wpdb->prefix}wc_order_product_lookup opl
         INNER JOIN {$wpdb->prefix}posts o ON o.ID = opl.order_id
         INNER JOIN {$wpdb->prefix}posts p ON p.ID = opl.product_id
-        LEFT JOIN {$wpdb->prefix}postmeta pm_stock ON p.ID = pm_stock.post_id AND pm_stock.meta_key = '_stock_status'
+        LEFT JOIN {$wpdb->prefix}postmeta pm_stock
+            ON pm_stock.post_id = COALESCE(NULLIF(p.post_parent, 0), p.ID)
+            AND pm_stock.meta_key = '_stock_status'
         {$where}
         GROUP BY product_id
         ORDER BY total_qty DESC
@@ -95,7 +99,9 @@ function harriet_get_best_sellers($request) {
         FROM {$wpdb->prefix}wc_order_product_lookup opl
         INNER JOIN {$wpdb->prefix}posts o ON o.ID = opl.order_id
         INNER JOIN {$wpdb->prefix}posts p ON p.ID = opl.product_id
-        LEFT JOIN {$wpdb->prefix}postmeta pm_stock ON p.ID = pm_stock.post_id AND pm_stock.meta_key = '_stock_status'
+        LEFT JOIN {$wpdb->prefix}postmeta pm_stock
+            ON pm_stock.post_id = COALESCE(NULLIF(p.post_parent, 0), p.ID)
+            AND pm_stock.meta_key = '_stock_status'
         {$where}
     ";
     $total = intval($wpdb->get_var($count_sql));
