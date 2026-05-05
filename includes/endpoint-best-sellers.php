@@ -7,10 +7,10 @@ add_action('rest_api_init', function () {
         'callback'            => 'harriet_get_best_sellers',
         'permission_callback' => '__return_true',
         'args'                => array(
-            'start_date' => array('type' => 'string', 'format' => 'date'),
-            'end_date'   => array('type' => 'string', 'format' => 'date'),
-            'limit'      => array('type' => 'integer', 'default' => 10, 'minimum' => 1, 'maximum' => 100),
-            'page'       => array('type' => 'integer', 'default' => 1, 'minimum' => 1),
+            'start_date' => array('type' => 'string',  'format' => 'date'),
+            'end_date'   => array('type' => 'string',  'format' => 'date'),
+            'per_page'   => array('type' => 'integer', 'default' => 10, 'minimum' => 1, 'maximum' => 100),
+            'page'       => array('type' => 'integer', 'default' => 1,  'minimum' => 1),
             'vendor_id'  => array('type' => 'integer', 'minimum' => 1),
         ),
     ));
@@ -20,11 +20,11 @@ function harriet_get_best_sellers($request) {
     global $wpdb;
 
     $start_date = $request->get_param('start_date');
-    $end_date = $request->get_param('end_date');
-    $limit = min(intval($request['limit']), 100);
-    $page = intval($request['page']);
-    $offset = ($page - 1) * $limit;
-    $vendor_id = $request->get_param('vendor_id') ? intval($request['vendor_id']) : null;
+    $end_date   = $request->get_param('end_date');
+    $per_page   = min(max(1, intval($request['per_page'])), 100);
+    $page       = max(1, intval($request['page']));
+    $offset     = ($page - 1) * $per_page;
+    $vendor_id  = $request->get_param('vendor_id') ? intval($request['vendor_id']) : null;
 
     if ($start_date && !strtotime($start_date)) {
         return new WP_Error('invalid_start_date', 'Invalid start_date format (use Y-m-d)', array('status' => 400));
@@ -36,13 +36,14 @@ function harriet_get_best_sellers($request) {
     $start_date = $start_date ? gmdate('Y-m-d H:i:s', strtotime($start_date)) : gmdate('Y-m-d H:i:s', strtotime('-60 days'));
     $end_date = $end_date ? gmdate('Y-m-d H:i:s', strtotime($end_date . ' 23:59:59')) : gmdate('Y-m-d H:i:s');
 
-    $cache_key = 'harriet_bestsellers_' . md5($start_date . $end_date . $limit . $page . $vendor_id);
+    $cache_key = 'harriet_bestsellers_' . md5($start_date . $end_date . $per_page . $page . $vendor_id);
     $cached = wp_cache_get($cache_key, 'harriet');
 
     if ($cached !== false) {
         $response = new WP_REST_Response($cached['products'], 200);
-        $response->header('X-WP-Total', $cached['total']);
-        $response->header('X-WP-Pages', ceil($cached['total'] / $limit));
+        $response->header('X-WP-Total',      $cached['total']);
+        $response->header('X-WP-TotalPages', ceil($cached['total'] / $per_page));
+        $response->header('X-WP-Pages',      ceil($cached['total'] / $per_page));
         return $response;
     }
 
@@ -86,7 +87,7 @@ function harriet_get_best_sellers($request) {
         GROUP BY product_id
         ORDER BY total_qty DESC
         LIMIT %d OFFSET %d
-    ", $limit, $offset);
+    ", $per_page, $offset);
 
     $results = $wpdb->get_results($sql);
 
@@ -136,8 +137,9 @@ function harriet_get_best_sellers($request) {
     wp_cache_set($cache_key, array('products' => $products, 'total' => $total), 'harriet', HOUR_IN_SECONDS);
 
     $response = new WP_REST_Response($products, 200);
-    $response->header('X-WP-Total', $total);
-    $response->header('X-WP-Pages', ceil($total / $limit));
+    $response->header('X-WP-Total',      $total);
+    $response->header('X-WP-TotalPages', ceil($total / $per_page));
+    $response->header('X-WP-Pages',      ceil($total / $per_page));
     return $response;
 }
 

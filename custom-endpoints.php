@@ -61,6 +61,7 @@ final class CustomEnd_Harriet {
         require_once CUSTOMEND_HARRIET_PATH . 'includes/endpoint-seo-info.php';
         require_once CUSTOMEND_HARRIET_PATH . 'includes/endpoint-vendor-register.php';
         require_once CUSTOMEND_HARRIET_PATH . 'includes/endpoint-unified-products.php';
+        require_once CUSTOMEND_HARRIET_PATH . 'includes/endpoint-just-for-you.php';
     }
 
     public function add_admin_menu() {
@@ -91,6 +92,7 @@ final class CustomEnd_Harriet {
             array('name' => 'Check Shop URL', 'route' => 'custom/v1/check-shop-url?shop_url=my-store', 'method' => 'GET', 'desc' => 'Check if shop slug is available'),
             array('name' => 'Products by Category', 'route' => 'wc/v3/products/by-category/{slug}', 'method' => 'GET', 'desc' => 'Products filtered by category with price/stock/pagination'),
             array('name' => 'Products by Tag', 'route' => 'wc/v3/products/by-tag/{slug}', 'method' => 'GET', 'desc' => 'Products filtered by tag with price/stock/pagination'),
+            array('name' => 'Just For You', 'route' => 'custom/v1/just-for-you?customer_id=123', 'method' => 'GET', 'desc' => 'Latest products personalised by customer gender (women → women/perfumes/lipstick; men → men/grooming/perfumes)'),
         );
         ?>
         <div class="wrap">
