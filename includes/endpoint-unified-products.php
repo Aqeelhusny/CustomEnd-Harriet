@@ -137,9 +137,10 @@ function harriet_unified_build_product_response($product, $vendor_store_cache) {
 
     $product_data['variations'] = array();
     if ($product->is_type('variable')) {
-        foreach ($product->get_available_variations() as $variation) {
-            $var_product = wc_get_product($variation['variation_id']);
-            if (!$var_product) continue;
+        $variation_ids = $product->get_children();
+        foreach ($variation_ids as $variation_id) {
+            $var_product = wc_get_product($variation_id);
+            if (!$var_product || !$var_product->variation_is_visible()) continue;
 
             $var_prices = harriet_unified_normalize_product_prices($var_product);
             $var_image_id = $var_product->get_image_id();
