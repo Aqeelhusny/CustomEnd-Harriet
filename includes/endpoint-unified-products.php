@@ -356,6 +356,14 @@ function harriet_unified_fetch_products_by_tag($request) {
 
 // Cache invalidation — targeted flush, not global wp_cache_flush()
 add_action('save_post_product', function ($post_id, $post) {
+    // Bail on autosave, revisions, and non-published/draft posts to avoid
+    // hammering cache on every WooCommerce internal save during checkout/order processing.
+    if (wp_is_post_autosave($post_id) || wp_is_post_revision($post_id)) return;
+
+    static $flushed = false;
+    if ($flushed) return;
+    $flushed = true;
+
     wp_cache_delete('harriet_enabled_vendors_list', 'harriet');
     if (function_exists('wp_cache_flush_group')) wp_cache_flush_group('harriet');
 }, 10, 2);
