@@ -60,13 +60,13 @@ function harriet_get_best_sellers($request) {
     $where_clauses = array(
         "o.post_type = 'shop_order'",
         "o.post_status IN ('wc-completed', 'wc-processing')",
-        "opl.date_created BETWEEN '{$start_date}' AND '{$end_date}'",
+        $wpdb->prepare("opl.date_created BETWEEN %s AND %s", $start_date, $end_date),
         "p.post_author IN ({$vendors_ids})",
         "pm_stock.meta_value != 'outofstock'",
     );
 
     if ($vendor_id && in_array($vendor_id, $enabled_vendors)) {
-        $where_clauses[] = "p.post_author = {$vendor_id}";
+        $where_clauses[] = $wpdb->prepare("p.post_author = %d", $vendor_id);
     }
 
     $where = "WHERE " . implode(" AND ", $where_clauses);
@@ -137,10 +137,14 @@ function harriet_get_best_sellers($request) {
 
 add_action('woocommerce_order_status_changed', function ($order_id, $old_status, $new_status) {
     if (in_array($new_status, array('completed', 'processing')) || in_array($old_status, array('completed', 'processing'))) {
-        wp_cache_flush();
+        if (function_exists('wp_cache_flush_group')) {
+            wp_cache_flush_group('harriet');
+        }
     }
 }, 10, 3);
 
 add_action('woocommerce_refund_created', function ($refund_id, $args) {
-    wp_cache_flush();
+    if (function_exists('wp_cache_flush_group')) {
+        wp_cache_flush_group('harriet');
+    }
 }, 10, 2);

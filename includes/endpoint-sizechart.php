@@ -1,10 +1,10 @@
 <?php
 if (!defined('ABSPATH')) exit;
 
-define('HARRIET_SIZE_CHART_ACF_FIELD', 'size_chart');
-define('HARRIET_SIZE_CHART_CAPABILITY', 'edit_products');
-define('HARRIET_SIZE_CHART_MAX_FILE_SIZE', 5 * 1024 * 1024);
-define('HARRIET_SIZE_CHART_ALLOWED_TYPES', ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf']);
+if (!defined('HARRIET_SIZE_CHART_ACF_FIELD')) define('HARRIET_SIZE_CHART_ACF_FIELD', 'size_chart');
+if (!defined('HARRIET_SIZE_CHART_CAPABILITY')) define('HARRIET_SIZE_CHART_CAPABILITY', 'edit_products');
+if (!defined('HARRIET_SIZE_CHART_MAX_FILE_SIZE')) define('HARRIET_SIZE_CHART_MAX_FILE_SIZE', 5 * 1024 * 1024);
+if (!defined('HARRIET_SIZE_CHART_ALLOWED_TYPES')) define('HARRIET_SIZE_CHART_ALLOWED_TYPES', ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf']);
 
 add_action('rest_api_init', 'harriet_register_size_chart_endpoints');
 
@@ -56,6 +56,10 @@ function harriet_get_product_size_chart($request) {
 
     if (!$product) {
         return new WP_Error('no_product', 'Product not found', ['status' => 404]);
+    }
+
+    if (!function_exists('get_field')) {
+        return rest_ensure_response(['product_id' => $product_id, 'file_id' => null, 'file_url' => null, 'notice' => 'ACF plugin not active']);
     }
 
     $file_id = get_field(HARRIET_SIZE_CHART_ACF_FIELD, $product_id);
@@ -128,10 +132,15 @@ function harriet_sizechart_handle_url_upload($url) {
 
     $url = esc_url_raw($url);
 
-    add_filter('http_request_timeout', function() { return 10; });
-    add_filter('http_request_redirection_count', function() { return 3; });
+    $timeout_filter  = function() { return 10; };
+    $redirect_filter = function() { return 3; };
+    add_filter('http_request_timeout', $timeout_filter);
+    add_filter('http_request_redirection_count', $redirect_filter);
 
     $temp_file = download_url($url);
+
+    remove_filter('http_request_timeout', $timeout_filter);
+    remove_filter('http_request_redirection_count', $redirect_filter);
 
     if (is_wp_error($temp_file)) {
         return new WP_Error('download_failed', $temp_file->get_error_message(), ['status' => 400]);

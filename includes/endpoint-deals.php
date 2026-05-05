@@ -23,11 +23,19 @@ add_action('rest_api_init', function () {
 });
 
 function harriet_check_deals_permission($request) {
-    $consumer_key = $request->get_param('consumer_key');
+    $consumer_key    = $request->get_param('consumer_key');
     $consumer_secret = $request->get_param('consumer_secret');
 
     if (!empty($consumer_key) && !empty($consumer_secret)) {
-        return true;
+        global $wpdb;
+        $key = $wpdb->get_row($wpdb->prepare(
+            "SELECT consumer_secret FROM {$wpdb->prefix}woocommerce_api_keys WHERE consumer_key = %s LIMIT 1",
+            wc_api_hash($consumer_key)
+        ));
+        if ($key && hash_equals($key->consumer_secret, $consumer_secret)) {
+            return true;
+        }
+        return new WP_Error('invalid_api_key', 'Invalid API credentials', array('status' => 401));
     }
 
     return current_user_can('manage_woocommerce');
@@ -39,8 +47,10 @@ function harriet_get_active_deals($request) {
     $per_page = min(intval($request['per_page']), 100);
     $page = intval($request['page']);
     $offset = ($page - 1) * $per_page;
-    $orderby = sanitize_text_field($request['orderby']);
-    $order = strtoupper(sanitize_text_field($request['order']));
+    $allowed_orderby = array('date', 'price', 'discount', 'name');
+    $allowed_order   = array('ASC', 'DESC');
+    $orderby = in_array($request['orderby'], $allowed_orderby) ? $request['orderby'] : 'date';
+    $order   = in_array(strtoupper($request['order']), $allowed_order) ? strtoupper($request['order']) : 'DESC';
     $min_discount = max(0, floatval($request['min_discount']));
     $vendor_id = $request['vendor_id'] ? intval($request['vendor_id']) : null;
     $category = $request['category'] ? sanitize_text_field($request['category']) : null;
@@ -57,7 +67,7 @@ function harriet_get_active_deals($request) {
         return $response;
     }
 
-    $current_time = current_time('timestamp');
+    $current_time = time();
 
     $enabled_sellers = $wpdb->get_col("
         SELECT user_id FROM {$wpdb->usermeta}
@@ -81,7 +91,7 @@ function harriet_get_active_deals($request) {
     );
 
     if ($vendor_id && in_array($vendor_id, $enabled_sellers)) {
-        $where_clauses[] = "p.post_author = {$vendor_id}";
+        $where_clauses[] = $wpdb->prepare("p.post_author = %d", $vendor_id);
     }
 
     if ($min_discount > 0) {
@@ -192,10 +202,14 @@ function harriet_get_active_deals($request) {
 
 add_action('update_post_meta', function ($meta_id, $post_id, $meta_key, $meta_value) {
     if (in_array($meta_key, array('_sale_price', '_regular_price', '_sale_price_dates_from', '_sale_price_dates_to'))) {
-        wp_cache_flush();
+        if (function_exists('wp_cache_flush_group')) {
+            wp_cache_flush_group('harriet');
+        }
     }
 }, 10, 4);
 
 add_action('woocommerce_scheduled_sales', function () {
-    wp_cache_flush();
+    if (function_exists('wp_cache_flush_group')) {
+        wp_cache_flush_group('harriet');
+    }
 });

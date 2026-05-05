@@ -59,6 +59,10 @@ function harriet_register_vendor($request) {
         return new WP_Error('missing_fields', 'Required fields are missing', ['status' => 400]);
     }
 
+    if (strlen($password) < 6) {
+        return new WP_Error('weak_password', 'Password must be at least 6 characters', ['status' => 400]);
+    }
+
     if (email_exists($email)) {
         return new WP_Error('email_exists', 'Email is already registered', ['status' => 400]);
     }
@@ -138,14 +142,14 @@ function harriet_register_vendor($request) {
     update_user_meta($user_id, 'dokan_profile_settings', $dokan_profile);
     update_user_meta($user_id, 'dokan_store_url', $username);
 
-    return [
+    return rest_ensure_response([
         'success'    => true,
         'user_id'    => $user_id,
         'username'   => $username,
         'role'       => 'seller',
         'store_slug' => $username,
         'store_url'  => site_url("/store/{$username}"),
-    ];
+    ]);
 }
 
 function harriet_check_email($request) {

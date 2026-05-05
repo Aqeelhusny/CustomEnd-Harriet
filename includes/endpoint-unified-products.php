@@ -18,6 +18,7 @@ function harriet_unified_get_enabled_vendors() {
 
 function harriet_unified_batch_load_vendor_stores($vendor_ids) {
     if (empty($vendor_ids)) return array();
+    if (!function_exists('dokan') || !dokan()->vendor) return array();
 
     $vendor_store_cache = array();
     $unique_ids = array_unique(array_values($vendor_ids));
@@ -86,7 +87,7 @@ function harriet_unified_normalize_product_prices($product) {
 
 function harriet_unified_build_product_response($product, $vendor_store_cache) {
     $pid = $product->get_id();
-    $seller_id = dokan_get_vendor_by_product($pid, true);
+    $seller_id = function_exists('dokan_get_vendor_by_product') ? dokan_get_vendor_by_product($pid, true) : 0;
     $prices = harriet_unified_normalize_product_prices($product);
 
     $product_data = array(
@@ -351,10 +352,15 @@ function harriet_unified_fetch_products_by_tag($request) {
     return $response;
 }
 
-// Cache invalidation
+// Cache invalidation — targeted flush, not global wp_cache_flush()
 add_action('save_post_product', function ($post_id, $post) {
-    wp_cache_flush();
+    wp_cache_delete('harriet_enabled_vendors_list', 'harriet');
+    if (function_exists('wp_cache_flush_group')) wp_cache_flush_group('harriet');
 }, 10, 2);
 
-add_action('edited_product_cat', function () { wp_cache_flush(); });
-add_action('edited_product_tag', function () { wp_cache_flush(); });
+add_action('edited_product_cat', function () {
+    if (function_exists('wp_cache_flush_group')) wp_cache_flush_group('harriet');
+});
+add_action('edited_product_tag', function () {
+    if (function_exists('wp_cache_flush_group')) wp_cache_flush_group('harriet');
+});
