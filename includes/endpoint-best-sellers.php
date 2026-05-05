@@ -10,6 +10,7 @@ add_action('rest_api_init', function () {
             'start_date' => array('type' => 'string',  'format' => 'date', 'required' => false, 'description' => 'Start date Y-m-d, defaults to 60 days ago'),
             'end_date'   => array('type' => 'string',  'format' => 'date', 'required' => false, 'description' => 'End date Y-m-d, defaults to today'),
             'per_page'   => array('type' => 'integer', 'default' => 10, 'minimum' => 1, 'maximum' => 100),
+            'limit'      => array('type' => 'integer', 'minimum' => 1, 'maximum' => 100, 'description' => 'Alias for per_page'),
             'page'       => array('type' => 'integer', 'default' => 1,  'minimum' => 1),
             'vendor_id'  => array('type' => 'integer', 'minimum' => 1,  'required' => false, 'description' => 'Filter by Dokan vendor user ID'),
         ),
@@ -19,13 +20,23 @@ add_action('rest_api_init', function () {
 function harriet_get_best_sellers($request) {
     global $wpdb;
 
-    // --- Parameters ---
+    // per_page wins; fall back to limit; then default 10
+    $limit_param = $request->get_param('limit');
+    $per_page    = $limit_param !== null
+        ? min(max(1, intval($limit_param)), 100)
+        : min(max(1, intval($request['per_page'])), 100);
+
     $raw_start = $request->get_param('start_date');
     $raw_end   = $request->get_param('end_date');
-    $per_page  = min(max(1, intval($request['per_page'])), 100);
     $page      = max(1, intval($request['page']));
     $offset    = ($page - 1) * $per_page;
     $vendor_id = $request->get_param('vendor_id') ? intval($request['vendor_id']) : null;
+
+    // per_page explicit param overrides limit
+    $per_page_param = $request->get_param('per_page');
+    if ($per_page_param !== null) {
+        $per_page = min(max(1, intval($per_page_param)), 100);
+    }
 
     if ($raw_start && !strtotime($raw_start)) {
         return new WP_Error('invalid_start_date', 'Invalid start_date format. Use Y-m-d', array('status' => 400));
@@ -41,20 +52,19 @@ function harriet_get_best_sellers($request) {
         ? gmdate('Y-m-d H:i:s', strtotime($raw_end . ' 23:59:59'))
         : gmdate('Y-m-d H:i:s');
 
-    // --- Cache ---
     $cache_key = 'harriet_bestsellers_' . md5($start_date . $end_date . $per_page . $page . $vendor_id);
     $cached    = wp_cache_get($cache_key, 'harriet');
 
     if ($cached !== false) {
-        $total     = $cached['total'];
-        $response  = new WP_REST_Response($cached['payload'], 200);
+        $total      = $cached['total'];
+        $total_pages = (int) ceil($total / $per_page);
+        $response   = new WP_REST_Response($cached['products'], 200);
         $response->header('X-WP-Total',      $total);
-        $response->header('X-WP-TotalPages', (int) ceil($total / $per_page));
-        $response->header('X-WP-Pages',      (int) ceil($total / $per_page));
+        $response->header('X-WP-TotalPages', $total_pages);
+        $response->header('X-WP-Pages',      $total_pages);
         return $response;
     }
 
-    // --- Enabled Dokan vendors ---
     $enabled_vendors = $wpdb->get_col("
         SELECT user_id FROM {$wpdb->usermeta}
         WHERE meta_key = 'dokan_enable_selling' AND meta_value = 'yes'
@@ -66,26 +76,18 @@ function harriet_get_best_sellers($request) {
 
     $vendors_ids_sql = implode(',', array_map('intval', $enabled_vendors));
 
-    // Validate vendor_id against enabled list
     if ($vendor_id && !in_array($vendor_id, $enabled_vendors)) {
         return new WP_Error('invalid_vendor', 'Vendor not found or not enabled', array('status' => 404));
     }
 
-    // --- Core WHERE clauses ---
     // Uses wc_order_product_lookup (WooCommerce Analytics table) — matches WC Admin
-    // "Top Sellers" report exactly and is refund-safe (product_net_revenue accounts for refunds).
-    // We resolve variations to their parent via COALESCE so each variable product
-    // counts as one entry regardless of how many variations were ordered.
+    // "Top Sellers" report exactly and is refund-safe.
+    // COALESCE resolves variations to their parent so each variable product counts once.
     $where_parts = array(
         "o.post_type = 'shop_order'",
         "o.post_status IN ('wc-completed', 'wc-processing')",
         $wpdb->prepare("opl.date_created BETWEEN %s AND %s", $start_date, $end_date),
-        // Restrict to products authored by active Dokan vendors.
-        // post_author on a variation is 0 — use COALESCE to the parent post.
         "COALESCE(NULLIF(p.post_parent, 0), p.post_author) IN ({$vendors_ids_sql})",
-        // Stock filter via EXISTS subquery on the *resolved parent* so we never
-        // accidentally join against a variation's stock row or miss products
-        // with no _stock_status meta (LEFT JOIN + WHERE turns into implicit INNER JOIN).
         "EXISTS (
             SELECT 1 FROM {$wpdb->postmeta} pm_s
             WHERE pm_s.post_id = COALESCE(NULLIF(p.post_parent, 0), p.ID)
@@ -103,7 +105,6 @@ function harriet_get_best_sellers($request) {
 
     $where = 'WHERE ' . implode(' AND ', $where_parts);
 
-    // --- Total count (distinct parent products in range) ---
     $total = (int) $wpdb->get_var("
         SELECT COUNT(DISTINCT COALESCE(NULLIF(p.post_parent, 0), opl.product_id))
         FROM {$wpdb->prefix}wc_order_product_lookup opl
@@ -112,8 +113,7 @@ function harriet_get_best_sellers($request) {
         {$where}
     ");
 
-    // --- Paginated results ---
-    $sql = $wpdb->prepare("
+    $rows = $wpdb->get_results($wpdb->prepare("
         SELECT
             COALESCE(NULLIF(p.post_parent, 0), opl.product_id) AS product_id,
             SUM(opl.product_qty)                                AS total_qty
@@ -124,25 +124,18 @@ function harriet_get_best_sellers($request) {
         GROUP BY product_id
         ORDER BY total_qty DESC
         LIMIT %d OFFSET %d
-    ", $per_page, $offset);
+    ", $per_page, $offset));
 
-    $rows = $wpdb->get_results($sql);
+    $total_pages = (int) ceil($total / $per_page);
 
     if (empty($rows)) {
-        return rest_ensure_response(array(
-            'meta' => array(
-                'start_date'     => $start_date,
-                'end_date'       => $end_date,
-                'page'           => $page,
-                'per_page'       => $per_page,
-                'total_products' => 0,
-                'total_pages'    => 0,
-            ),
-            'data' => array(),
-        ));
+        $response = new WP_REST_Response(array(), 200);
+        $response->header('X-WP-Total',      0);
+        $response->header('X-WP-TotalPages', 0);
+        $response->header('X-WP-Pages',      0);
+        return $response;
     }
 
-    // --- Hydrate products ---
     $fields_to_remove = array(
         'downloadable', 'downloads', 'download_limit', 'download_expiry',
         'external_url', 'button_text', 'tax_status', 'tax_class',
@@ -173,23 +166,9 @@ function harriet_get_best_sellers($request) {
         $products[] = $data;
     }
 
-    $total_pages = (int) ceil($total / $per_page);
+    wp_cache_set($cache_key, array('products' => $products, 'total' => $total), 'harriet', HOUR_IN_SECONDS);
 
-    $payload = array(
-        'meta' => array(
-            'start_date'     => $start_date,
-            'end_date'       => $end_date,
-            'page'           => $page,
-            'per_page'       => $per_page,
-            'total_products' => $total,
-            'total_pages'    => $total_pages,
-        ),
-        'data' => $products,
-    );
-
-    wp_cache_set($cache_key, array('payload' => $payload, 'total' => $total), 'harriet', HOUR_IN_SECONDS);
-
-    $response = new WP_REST_Response($payload, 200);
+    $response = new WP_REST_Response($products, 200);
     $response->header('X-WP-Total',      $total);
     $response->header('X-WP-TotalPages', $total_pages);
     $response->header('X-WP-Pages',      $total_pages);
