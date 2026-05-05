@@ -9,7 +9,7 @@ add_action('rest_api_init', function () {
         'args'                => array(
             'start_date' => array('type' => 'string',  'format' => 'date', 'required' => false, 'description' => 'Start date Y-m-d, defaults to 60 days ago'),
             'end_date'   => array('type' => 'string',  'format' => 'date', 'required' => false, 'description' => 'End date Y-m-d, defaults to today'),
-            'per_page'   => array('type' => 'integer', 'default' => 10, 'minimum' => 1, 'maximum' => 100),
+            'per_page'   => array('type' => 'integer', 'minimum' => 1, 'maximum' => 100, 'description' => 'Number of results per page'),
             'limit'      => array('type' => 'integer', 'minimum' => 1, 'maximum' => 100, 'description' => 'Alias for per_page'),
             'page'       => array('type' => 'integer', 'default' => 1,  'minimum' => 1),
             'vendor_id'  => array('type' => 'integer', 'minimum' => 1,  'required' => false, 'description' => 'Filter by Dokan vendor user ID'),
@@ -20,14 +20,12 @@ add_action('rest_api_init', function () {
 function harriet_get_best_sellers($request) {
     global $wpdb;
 
-    // Resolve per_page: explicit per_page wins, then limit, then default 10.
-    // Must use get_param() for both — $request['per_page'] always returns the
-    // registered default (10) even when the param was not sent by the client.
+    // per_page wins over limit; both fall back to 10.
+    // No registered default on per_page so get_param() returns null when absent.
     $per_page_param = $request->get_param('per_page');
     $limit_param    = $request->get_param('limit');
-    $per_page = min(max(1, intval(
-        $per_page_param !== null ? $per_page_param : ($limit_param !== null ? $limit_param : 10)
-    )), 100);
+    $resolved       = $per_page_param ?? $limit_param ?? 10;
+    $per_page       = min(max(1, intval($resolved)), 100);
 
     $raw_start = $request->get_param('start_date');
     $raw_end   = $request->get_param('end_date');
