@@ -20,23 +20,20 @@ add_action('rest_api_init', function () {
 function harriet_get_best_sellers($request) {
     global $wpdb;
 
-    // per_page wins; fall back to limit; then default 10
-    $limit_param = $request->get_param('limit');
-    $per_page    = $limit_param !== null
-        ? min(max(1, intval($limit_param)), 100)
-        : min(max(1, intval($request['per_page'])), 100);
+    // Resolve per_page: explicit per_page wins, then limit, then default 10.
+    // Must use get_param() for both — $request['per_page'] always returns the
+    // registered default (10) even when the param was not sent by the client.
+    $per_page_param = $request->get_param('per_page');
+    $limit_param    = $request->get_param('limit');
+    $per_page = min(max(1, intval(
+        $per_page_param !== null ? $per_page_param : ($limit_param !== null ? $limit_param : 10)
+    )), 100);
 
     $raw_start = $request->get_param('start_date');
     $raw_end   = $request->get_param('end_date');
     $page      = max(1, intval($request['page']));
     $offset    = ($page - 1) * $per_page;
     $vendor_id = $request->get_param('vendor_id') ? intval($request['vendor_id']) : null;
-
-    // per_page explicit param overrides limit
-    $per_page_param = $request->get_param('per_page');
-    if ($per_page_param !== null) {
-        $per_page = min(max(1, intval($per_page_param)), 100);
-    }
 
     if ($raw_start && !strtotime($raw_start)) {
         return new WP_Error('invalid_start_date', 'Invalid start_date format. Use Y-m-d', array('status' => 400));
