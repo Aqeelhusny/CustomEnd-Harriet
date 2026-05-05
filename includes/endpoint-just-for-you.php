@@ -321,5 +321,7 @@ add_action('save_post_product', 'harriet_jfy_bust_cache');
 add_action('woocommerce_product_object_updated_props', 'harriet_jfy_bust_cache');
 
 function harriet_jfy_bust_cache() {
-    wp_cache_delete_group('harriet');
+    if (function_exists('wp_cache_flush_group')) {
+        wp_cache_flush_group('harriet');
+    }
 }
