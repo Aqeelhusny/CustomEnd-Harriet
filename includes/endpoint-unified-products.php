@@ -199,9 +199,11 @@ function harriet_unified_fetch_products_by_category($request) {
     if (!$shuffle) {
         $cached = wp_cache_get($cache_key, 'harriet');
         if ($cached !== false) {
+            $total_pages = (int) ceil($cached['total'] / $per_page);
             $response = new WP_REST_Response($cached['data'], 200);
             $response->header('X-WP-Total', $cached['total']);
-            $response->header('X-WP-Pages', ceil($cached['total'] / $per_page));
+            $response->header('X-WP-TotalPages', $total_pages);
+            $response->header('X-WP-Pages', $total_pages);
             return $response;
         }
     }
@@ -255,9 +257,11 @@ function harriet_unified_fetch_products_by_category($request) {
         wp_cache_set($cache_key, array('data' => $products_data, 'total' => $total), 'harriet', 5 * MINUTE_IN_SECONDS);
     }
 
+    $total_pages = (int) ceil($total / $per_page);
     $response = new WP_REST_Response($products_data, 200);
     $response->header('X-WP-Total', $total);
-    $response->header('X-WP-Pages', ceil($total / $per_page));
+    $response->header('X-WP-TotalPages', $total_pages);
+    $response->header('X-WP-Pages', $total_pages);
     return $response;
 }
 
@@ -293,9 +297,11 @@ function harriet_unified_fetch_products_by_tag($request) {
     if (!$shuffle) {
         $cached = wp_cache_get($cache_key, 'harriet');
         if ($cached !== false) {
+            $total_pages = (int) ceil($cached['total'] / $per_page);
             $response = new WP_REST_Response($cached['data'], 200);
             $response->header('X-WP-Total', $cached['total']);
-            $response->header('X-WP-Pages', ceil($cached['total'] / $per_page));
+            $response->header('X-WP-TotalPages', $total_pages);
+            $response->header('X-WP-Pages', $total_pages);
             return $response;
         }
     }
@@ -349,9 +355,11 @@ function harriet_unified_fetch_products_by_tag($request) {
         wp_cache_set($cache_key, array('data' => $products_data, 'total' => $total), 'harriet', 5 * MINUTE_IN_SECONDS);
     }
 
+    $total_pages = (int) ceil($total / $per_page);
     $response = new WP_REST_Response($products_data, 200);
     $response->header('X-WP-Total', $total);
-    $response->header('X-WP-Pages', ceil($total / $per_page));
+    $response->header('X-WP-TotalPages', $total_pages);
+    $response->header('X-WP-Pages', $total_pages);
     return $response;
 }
 

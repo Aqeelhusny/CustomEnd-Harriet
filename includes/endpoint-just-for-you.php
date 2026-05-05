@@ -71,7 +71,11 @@ function harriet_jfy_handler(WP_REST_Request $request) {
     $cache_key = 'harriet_jfy_' . md5($gender . implode(',', $category_slugs) . $per_page . $page);
     $cached = wp_cache_get($cache_key, 'harriet');
     if ($cached !== false) {
-        return new WP_REST_Response($cached, 200);
+        $response = new WP_REST_Response($cached, 200);
+        $response->header('X-WP-Total',      $cached['total']);
+        $response->header('X-WP-TotalPages', $cached['total_pages']);
+        $response->header('X-WP-Pages',      $cached['total_pages']);
+        return $response;
     }
 
     // --- Query products ---
@@ -148,7 +152,11 @@ function harriet_jfy_handler(WP_REST_Request $request) {
 
     wp_cache_set($cache_key, $response_data, 'harriet', 5 * MINUTE_IN_SECONDS);
 
-    return new WP_REST_Response($response_data, 200);
+    $response = new WP_REST_Response($response_data, 200);
+    $response->header('X-WP-Total',      $total_products);
+    $response->header('X-WP-TotalPages', $total_pages);
+    $response->header('X-WP-Pages',      $total_pages);
+    return $response;
 }
 
 // ---------------------------------------------------------------------------

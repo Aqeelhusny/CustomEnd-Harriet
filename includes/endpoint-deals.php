@@ -59,9 +59,11 @@ function harriet_get_active_deals($request) {
     $cached    = wp_cache_get($cache_key, 'harriet');
 
     if ($cached !== false) {
+        $total_pages = (int) ceil($cached['total'] / $per_page);
         $response = new WP_REST_Response($cached['products'], 200);
-        $response->header('X-WP-Total',  $cached['total']);
-        $response->header('X-WP-Pages',  ceil($cached['total'] / $per_page));
+        $response->header('X-WP-Total',      $cached['total']);
+        $response->header('X-WP-TotalPages', $total_pages);
+        $response->header('X-WP-Pages',      $total_pages);
         return $response;
     }
 
@@ -286,9 +288,11 @@ function harriet_get_active_deals($request) {
 
     wp_cache_set($cache_key, array('products' => $products, 'total' => $total), 'harriet', 15 * MINUTE_IN_SECONDS);
 
+    $total_pages = (int) ceil($total / $per_page);
     $response = new WP_REST_Response($products, 200);
-    $response->header('X-WP-Total',  $total);
-    $response->header('X-WP-Pages',  ceil($total / $per_page));
+    $response->header('X-WP-Total',      $total);
+    $response->header('X-WP-TotalPages', $total_pages);
+    $response->header('X-WP-Pages',      $total_pages);
     return $response;
 }
 
