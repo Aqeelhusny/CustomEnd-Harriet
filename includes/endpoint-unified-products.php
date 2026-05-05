@@ -111,7 +111,9 @@ function harriet_unified_build_product_response($product, $vendor_store_cache) {
         'date_on_sale_from'  => $product->get_date_on_sale_from() ? $product->get_date_on_sale_from()->date('Y-m-d H:i:s') : null,
         'date_on_sale_to'    => $product->get_date_on_sale_to() ? $product->get_date_on_sale_to()->date('Y-m-d H:i:s') : null,
         'images'             => array(),
-        'categories'         => wp_get_post_terms($pid, 'product_cat', array('fields' => 'all')),
+        'categories'         => array_map(function ($t) {
+            return array('id' => $t->term_id, 'name' => $t->name, 'slug' => $t->slug);
+        }, wp_get_post_terms($pid, 'product_cat', array('fields' => 'all'))),
     );
 
     if ($prices['price_range']) $product_data['price_range'] = $prices['price_range'];

@@ -28,6 +28,10 @@ add_action('rest_api_init', function () {
 });
 
 function harriet_register_vendor($request) {
+    if (!function_exists('dokan') || !class_exists('WeDevs\Dokan\Vendor\Vendor')) {
+        return new WP_Error('dokan_missing', 'Dokan plugin is required for vendor registration', ['status' => 503]);
+    }
+
     $params = $request->get_json_params();
 
     $first_name = sanitize_text_field($params['firstName'] ?? '');
@@ -141,6 +145,7 @@ function harriet_register_vendor($request) {
 
     update_user_meta($user_id, 'dokan_profile_settings', $dokan_profile);
     update_user_meta($user_id, 'dokan_store_url', $username);
+    update_user_meta($user_id, 'dokan_enable_selling', 'yes');
 
     return rest_ensure_response([
         'success'    => true,

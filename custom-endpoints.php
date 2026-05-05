@@ -3,7 +3,7 @@
  * Plugin Name: CustomEnd Harriet
  * Plugin URI: https://github.com/AqeelHusny/CustomEnd-Harriet
  * Description: Custom REST API endpoints for Harriet Shopping — Size Charts, Best Sellers, Deals, SEO Info, Vendor Registration, and Unified Product APIs.
- * Version: 1.0.0
+ * Version: 1.0.1
  * Author: Aqeel Husny
  * Author URI: https://github.com/AqeelHusny/CustomEnd-Harriet
  * License: GPL-2.0+
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
 }
 
 if (!defined('CUSTOMEND_HARRIET_VERSION')) {
-    define('CUSTOMEND_HARRIET_VERSION', '1.0.0');
+    define('CUSTOMEND_HARRIET_VERSION', '1.0.1');
 }
 if (!defined('CUSTOMEND_HARRIET_PATH')) {
     define('CUSTOMEND_HARRIET_PATH', plugin_dir_path(__FILE__));
@@ -118,7 +118,7 @@ final class CustomEnd_Harriet {
                     <?php endforeach; ?>
                 </tbody>
             </table>
-            <p style="margin-top:20px;color:#666;">Plugin Version: <?php echo CUSTOMEND_HARRIET_VERSION; ?> | Author: <a href="https://github.com/AqeelHusny/CustomEnd-Harriet" target="_blank">Aqeel Husny</a></p>
+            <p style="margin-top:20px;color:#666;">Plugin Version: <?php echo esc_html(CUSTOMEND_HARRIET_VERSION); ?> | Author: <a href="https://github.com/AqeelHusny/CustomEnd-Harriet" target="_blank">Aqeel Husny</a></p>
         </div>
         <?php
     }
