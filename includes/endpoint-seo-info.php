@@ -37,7 +37,180 @@ add_action('rest_api_init', function () {
             'slugs' => array('type' => 'string', 'required' => true, 'validate_callback' => function ($param) { return is_string($param); }),
         ),
     ));
+
+    register_rest_route('wc/v3', '/tag-info/(?P<slug>[\\w-]+)', array(
+        'methods'             => 'GET',
+        'callback'            => 'harriet_get_tag_info',
+        'permission_callback' => '__return_true',
+        'args'                => array(
+            'slug' => array('validate_callback' => function ($param) { return is_string($param); }),
+        ),
+    ));
 });
+
+if (!function_exists('harriet_normalize_term_lookup_value')) {
+    function harriet_normalize_term_lookup_value($value) {
+        $value = remove_accents(wp_strip_all_tags((string) $value));
+        $value = strtolower($value);
+        $value = preg_replace('/[^a-z0-9]+/', ' ', $value);
+        return trim(preg_replace('/\s+/', ' ', $value));
+    }
+}
+
+if (!function_exists('harriet_term_lookup_variants')) {
+    function harriet_term_lookup_variants($value) {
+        $variants = array();
+        $normalized = harriet_normalize_term_lookup_value($value);
+
+        if ($normalized !== '') {
+            $variants[] = $normalized;
+        }
+
+        $slug_variant = harriet_normalize_term_lookup_value(sanitize_title($value));
+        if ($slug_variant !== '') {
+            $variants[] = $slug_variant;
+        }
+
+        foreach ($variants as $variant) {
+            if (substr($variant, -1) === 's' && strlen($variant) > 3) {
+                $variants[] = rtrim($variant, 's');
+            } elseif ($variant !== '') {
+                $variants[] = $variant . 's';
+            }
+        }
+
+        return array_values(array_unique(array_filter($variants)));
+    }
+}
+
+if (!function_exists('harriet_score_term_match')) {
+    function harriet_score_term_match($needle_variants, $candidate_value) {
+        $candidate_variants = harriet_term_lookup_variants($candidate_value);
+        $best_score = 0;
+
+        foreach ($needle_variants as $needle) {
+            foreach ($candidate_variants as $candidate) {
+                if ($needle === '' || $candidate === '') {
+                    continue;
+                }
+
+                if ($needle === $candidate) {
+                    return 1000;
+                }
+
+                if (strpos($candidate, $needle) !== false || strpos($needle, $candidate) !== false) {
+                    $best_score = max($best_score, 800 - abs(strlen($candidate) - strlen($needle)) * 10);
+                }
+
+                similar_text($needle, $candidate, $percent);
+                $best_score = max($best_score, (int) round($percent * 5));
+
+                if (function_exists('levenshtein')) {
+                    $distance = levenshtein($needle, $candidate);
+                    $max_length = max(strlen($needle), strlen($candidate));
+                    if ($max_length > 0) {
+                        $distance_score = (int) round((1 - min($distance, $max_length) / $max_length) * 400);
+                        $best_score = max($best_score, $distance_score);
+                    }
+                }
+            }
+        }
+
+        return $best_score;
+    }
+}
+
+if (!function_exists('harriet_find_best_matching_term')) {
+    function harriet_find_best_matching_term($taxonomy, $raw_value) {
+        $raw_value = (string) $raw_value;
+        $cache_key = 'harriet_term_match_' . md5($taxonomy . '|' . $raw_value);
+        $cached = wp_cache_get($cache_key, 'harriet');
+
+        if ($cached !== false) {
+            if (!$cached) {
+                return false;
+            }
+
+            $term = get_term($cached, $taxonomy);
+            return ($term && !is_wp_error($term)) ? $term : false;
+        }
+
+        $slug = sanitize_title($raw_value);
+        $term = get_term_by('slug', $slug, $taxonomy);
+
+        if (!$term || is_wp_error($term)) {
+            $terms = get_terms(array(
+                'taxonomy'   => $taxonomy,
+                'hide_empty' => false,
+            ));
+
+            if (!is_wp_error($terms) && !empty($terms)) {
+                $needle_variants = harriet_term_lookup_variants($raw_value);
+                $best_term = false;
+                $best_score = 0;
+
+                foreach ($terms as $candidate) {
+                    $score = max(
+                        harriet_score_term_match($needle_variants, $candidate->slug),
+                        harriet_score_term_match($needle_variants, $candidate->name)
+                    );
+
+                    if ($score > $best_score) {
+                        $best_score = $score;
+                        $best_term = $candidate;
+                    }
+                }
+
+                if ($best_term && $best_score >= 320) {
+                    $term = $best_term;
+                }
+            }
+        }
+
+        wp_cache_set($cache_key, ($term && !is_wp_error($term)) ? (int) $term->term_id : 0, 'harriet', 12 * HOUR_IN_SECONDS);
+        return ($term && !is_wp_error($term)) ? $term : false;
+    }
+}
+
+if (!function_exists('harriet_get_rank_math_term_data')) {
+    function harriet_get_rank_math_term_data($term_id) {
+        return array(
+            'meta_title'       => get_term_meta($term_id, 'rank_math_title', true),
+            'meta_description' => get_term_meta($term_id, 'rank_math_description', true),
+            'meta_keywords'    => get_term_meta($term_id, 'rank_math_focus_keyword', true),
+            'canonical'        => get_term_meta($term_id, 'rank_math_canonical_url', true),
+            'robots'           => get_term_meta($term_id, 'rank_math_robots', true),
+            'social_image'     => harriet_resolve_rank_math_social_image_url(get_term_meta($term_id, 'rank_math_social_image', true)),
+        );
+    }
+}
+
+if (!function_exists('harriet_resolve_rank_math_social_image_url')) {
+    function harriet_resolve_rank_math_social_image_url($image_meta) {
+        if (empty($image_meta)) {
+            return '';
+        }
+
+        if (is_numeric($image_meta)) {
+            return (string) wp_get_attachment_url((int) $image_meta);
+        }
+
+        if (is_array($image_meta)) {
+            if (!empty($image_meta['url'])) {
+                return (string) $image_meta['url'];
+            }
+            if (!empty($image_meta['id'])) {
+                return (string) wp_get_attachment_url((int) $image_meta['id']);
+            }
+        }
+
+        if (is_string($image_meta) && filter_var($image_meta, FILTER_VALIDATE_URL)) {
+            return $image_meta;
+        }
+
+        return '';
+    }
+}
 
 function harriet_get_product_info($request) {
     $product_slug = sanitize_text_field($request['slug']);
@@ -208,6 +381,38 @@ function harriet_get_category_info($request) {
     return new WP_REST_Response($category_data, 200);
 }
 
+function harriet_get_tag_info($request) {
+    $tag_slug = sanitize_text_field($request['slug']);
+
+    $cache_key = 'harriet_tag_info_' . $tag_slug;
+    $cached = wp_cache_get($cache_key, 'harriet');
+    if ($cached !== false) return new WP_REST_Response($cached, 200);
+
+    $tag = harriet_find_best_matching_term('product_tag', $tag_slug);
+    if (!$tag) {
+        return new WP_Error('no_tag', 'Tag not found', array('status' => 404));
+    }
+
+    $image_src = '';
+    $thumbnail_id = get_term_meta($tag->term_id, 'thumbnail_id', true);
+    if ($thumbnail_id) {
+        $image_src = wp_get_attachment_url($thumbnail_id);
+    }
+
+    $tag_data = array(
+        'name'        => $tag->name,
+        'slug'        => $tag->slug,
+        'description' => $tag->description,
+        'image'       => array(
+            'src' => $image_src ?: null,
+        ),
+        'rank_math'   => harriet_get_rank_math_term_data($tag->term_id),
+    );
+
+    wp_cache_set($cache_key, $tag_data, 'harriet', 24 * HOUR_IN_SECONDS);
+    return new WP_REST_Response($tag_data, 200);
+}
+
 function harriet_get_categories_info_batch($request) {
     $slugs = array_filter(array_map('trim', explode(',', $request->get_param('slugs'))));
 
@@ -309,4 +514,17 @@ add_action('update_term_meta', function ($meta_id, $term_id, $meta_key, $meta_va
     if (strpos($meta_key, 'rank_math_') !== 0 && $meta_key !== 'thumbnail_id') return;
     $category = get_term($term_id, 'product_cat');
     if ($category && !is_wp_error($category)) wp_cache_delete('harriet_cat_info_' . $category->slug, 'harriet');
+
+    $tag = get_term($term_id, 'product_tag');
+    if ($tag && !is_wp_error($tag)) wp_cache_delete('harriet_tag_info_' . $tag->slug, 'harriet');
 }, 10, 4);
+
+add_action('edited_product_tag', function ($term_id) {
+    $tag = get_term($term_id, 'product_tag');
+    if ($tag && !is_wp_error($tag)) wp_cache_delete('harriet_tag_info_' . $tag->slug, 'harriet');
+});
+
+add_action('delete_product_tag', function ($term_id) {
+    $tag = get_term($term_id, 'product_tag');
+    if ($tag && !is_wp_error($tag)) wp_cache_delete('harriet_tag_info_' . $tag->slug, 'harriet');
+});
