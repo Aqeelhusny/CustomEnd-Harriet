@@ -29,6 +29,7 @@ Custom REST API endpoints plugin for **Harriet Shopping** (WooCommerce + Dokan m
 | `/wp-json/wc/v3/products-info?slugs=a,b` | GET | Batch product SEO |
 | `/wp-json/wc/v3/category-info/{slug}` | GET | Category SEO metadata |
 | `/wp-json/wc/v3/categories-info?slugs=a,b` | GET | Batch category SEO |
+| `/wp-json/wc/v3/tag-info/{slug}` | GET | Tag SEO metadata |
 | `/wp-json/custom/v1/register-vendor` | POST | Register Dokan vendor |
 | `/wp-json/custom/v1/check-email` | GET | Check email availability |
 | `/wp-json/custom/v1/check-shop-url` | GET | Check shop slug availability |

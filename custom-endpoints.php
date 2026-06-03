@@ -87,6 +87,7 @@ final class CustomEnd_Harriet {
             array('name' => 'Batch Products Info', 'route' => 'wc/v3/products-info?slugs=slug1,slug2', 'method' => 'GET', 'desc' => 'Batch product SEO metadata (up to 20)'),
             array('name' => 'Category SEO Info', 'route' => 'wc/v3/category-info/{slug}', 'method' => 'GET', 'desc' => 'Single category SEO metadata'),
             array('name' => 'Batch Categories Info', 'route' => 'wc/v3/categories-info?slugs=slug1,slug2', 'method' => 'GET', 'desc' => 'Batch category SEO metadata (up to 20)'),
+            array('name' => 'Tag SEO Info', 'route' => 'wc/v3/tag-info/{slug}', 'method' => 'GET', 'desc' => 'Single tag SEO metadata (Rank Math)'),
             array('name' => 'Register Vendor', 'route' => 'custom/v1/register-vendor', 'method' => 'POST', 'desc' => 'Register a new Dokan vendor (multi-step)'),
             array('name' => 'Check Email', 'route' => 'custom/v1/check-email?email=test@example.com', 'method' => 'GET', 'desc' => 'Check if email is already registered'),
             array('name' => 'Check Shop URL', 'route' => 'custom/v1/check-shop-url?shop_url=my-store', 'method' => 'GET', 'desc' => 'Check if shop slug is available'),

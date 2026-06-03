@@ -186,7 +186,7 @@ add_action('rest_api_init', function () {
 });
 
 function harriet_unified_fetch_products_by_category($request) {
-    $category_slug = sanitize_text_field($request['category']);
+    $category_lookup = sanitize_text_field($request['category']);
     $page          = $request['page'];
     $per_page      = $request['per_page'];
     $minPrice      = floatval($request['minPrice']);
@@ -194,7 +194,15 @@ function harriet_unified_fetch_products_by_category($request) {
     $stock_status  = $request['stock_status'];
     $shuffle       = (bool) $request->get_param('shuffle');
 
-    $cache_key = 'harriet_cat_' . md5($category_slug . $page . $per_page . $minPrice . $maxPrice . $stock_status);
+    $category = function_exists('harriet_find_best_matching_term')
+        ? harriet_find_best_matching_term('product_cat', $category_lookup)
+        : get_term_by('slug', sanitize_title($category_lookup), 'product_cat');
+
+    if (!$category || is_wp_error($category)) {
+        return new WP_Error('no_category', 'Category not found', array('status' => 404));
+    }
+
+    $cache_key = 'harriet_cat_' . md5($category->slug . $page . $per_page . $minPrice . $maxPrice . $stock_status);
 
     if (!$shuffle) {
         $cached = wp_cache_get($cache_key, 'harriet');
@@ -216,7 +224,7 @@ function harriet_unified_fetch_products_by_category($request) {
     $args = array(
         'post_type' => 'product', 'post_status' => 'publish',
         'author__in' => $enabled_vendors, 'posts_per_page' => $per_page, 'paged' => $page,
-        'tax_query' => array(array('taxonomy' => 'product_cat', 'field' => 'slug', 'terms' => $category_slug)),
+        'tax_query' => array(array('taxonomy' => 'product_cat', 'field' => 'term_id', 'terms' => (int) $category->term_id)),
     );
 
     $meta_query = array('relation' => 'AND');
@@ -284,7 +292,7 @@ add_action('rest_api_init', function () {
 });
 
 function harriet_unified_fetch_products_by_tag($request) {
-    $tag_slug      = sanitize_text_field($request['tag']);
+    $tag_lookup    = sanitize_text_field($request['tag']);
     $page          = $request['page'];
     $per_page      = $request['per_page'];
     $minPrice      = floatval($request['minPrice']);
@@ -292,7 +300,15 @@ function harriet_unified_fetch_products_by_tag($request) {
     $stock_status  = $request['stock_status'];
     $shuffle       = (bool) $request->get_param('shuffle');
 
-    $cache_key = 'harriet_tag_' . md5($tag_slug . $page . $per_page . $minPrice . $maxPrice . $stock_status);
+    $tag = function_exists('harriet_find_best_matching_term')
+        ? harriet_find_best_matching_term('product_tag', $tag_lookup)
+        : get_term_by('slug', sanitize_title($tag_lookup), 'product_tag');
+
+    if (!$tag || is_wp_error($tag)) {
+        return new WP_Error('no_tag', 'Tag not found', array('status' => 404));
+    }
+
+    $cache_key = 'harriet_tag_' . md5($tag->slug . $page . $per_page . $minPrice . $maxPrice . $stock_status);
 
     if (!$shuffle) {
         $cached = wp_cache_get($cache_key, 'harriet');
@@ -314,7 +330,7 @@ function harriet_unified_fetch_products_by_tag($request) {
     $args = array(
         'post_type' => 'product', 'post_status' => 'publish',
         'author__in' => $enabled_vendors, 'posts_per_page' => $per_page, 'paged' => $page,
-        'tax_query' => array(array('taxonomy' => 'product_tag', 'field' => 'slug', 'terms' => $tag_slug)),
+        'tax_query' => array(array('taxonomy' => 'product_tag', 'field' => 'term_id', 'terms' => (int) $tag->term_id)),
     );
 
     $meta_query = array('relation' => 'AND');
