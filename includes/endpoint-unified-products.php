@@ -85,6 +85,150 @@ function harriet_unified_normalize_product_prices($product) {
     );
 }
 
+function harriet_unified_get_product_discount_percentage($product) {
+    if (!$product || !$product->is_on_sale()) {
+        return 0.0;
+    }
+
+    $max_discount = 0.0;
+
+    if ($product->is_type('variable')) {
+        foreach ($product->get_children() as $variation_id) {
+            $variation = wc_get_product($variation_id);
+
+            if (!$variation || !$variation->variation_is_visible()) {
+                continue;
+            }
+
+            $regular_price = (float) $variation->get_regular_price();
+            $sale_price = $variation->get_sale_price();
+
+            if ($regular_price <= 0 || $sale_price === '' || $sale_price === null) {
+                continue;
+            }
+
+            $sale_price = (float) $sale_price;
+
+            if ($sale_price >= $regular_price) {
+                continue;
+            }
+
+            $discount = (($regular_price - $sale_price) / $regular_price) * 100;
+            if ($discount > $max_discount) {
+                $max_discount = $discount;
+            }
+        }
+
+        return round($max_discount, 2);
+    }
+
+    $regular_price = (float) $product->get_regular_price();
+    $sale_price = $product->get_sale_price();
+
+    if ($regular_price <= 0 || $sale_price === '' || $sale_price === null) {
+        return 0.0;
+    }
+
+    $sale_price = (float) $sale_price;
+
+    if ($sale_price >= $regular_price) {
+        return 0.0;
+    }
+
+    return round((($regular_price - $sale_price) / $regular_price) * 100, 2);
+}
+
+function harriet_unified_sort_product_objects(&$products, $orderby, $order) {
+    $direction = strtoupper($order) === 'ASC' ? 1 : -1;
+
+    usort($products, function ($left, $right) use ($orderby, $direction) {
+        switch ($orderby) {
+            case 'price':
+                $left_value = (float) $left->get_price();
+                $right_value = (float) $right->get_price();
+                break;
+
+            case 'name':
+            case 'title':
+                $comparison = strcasecmp($left->get_name(), $right->get_name());
+                if ($comparison !== 0) {
+                    return $comparison * $direction;
+                }
+                return $left->get_id() <=> $right->get_id();
+
+            case 'offers':
+                $left_on_sale = $left->is_on_sale() ? 1 : 0;
+                $right_on_sale = $right->is_on_sale() ? 1 : 0;
+
+                if ($left_on_sale !== $right_on_sale) {
+                    return $right_on_sale <=> $left_on_sale;
+                }
+
+                if ($left_on_sale === 1) {
+                    $left_discount = harriet_unified_get_product_discount_percentage($left);
+                    $right_discount = harriet_unified_get_product_discount_percentage($right);
+
+                    if ($left_discount !== $right_discount) {
+                        return $right_discount <=> $left_discount;
+                    }
+                }
+
+                $left_value = $left->get_date_created() ? $left->get_date_created()->getTimestamp() : 0;
+                $right_value = $right->get_date_created() ? $right->get_date_created()->getTimestamp() : 0;
+                break;
+
+            case 'date':
+            default:
+                $left_value = $left->get_date_created() ? $left->get_date_created()->getTimestamp() : 0;
+                $right_value = $right->get_date_created() ? $right->get_date_created()->getTimestamp() : 0;
+                break;
+        }
+
+        if ($left_value === $right_value) {
+            return $left->get_id() <=> $right->get_id();
+        }
+
+        return ($left_value <=> $right_value) * $direction;
+    });
+}
+
+function harriet_unified_collect_products($args, $offers_only, $orderby, $order) {
+    $query_args = array_merge($args, array(
+        'fields'                 => 'ids',
+        'posts_per_page'         => -1,
+        'paged'                  => 1,
+        'no_found_rows'          => true,
+        'update_post_meta_cache' => false,
+        'update_post_term_cache' => false,
+    ));
+
+    $query = new WP_Query($query_args);
+
+    if (!$query->have_posts()) {
+        return array();
+    }
+
+    $products = array();
+
+    foreach ($query->posts as $product_id) {
+        $product = wc_get_product($product_id);
+
+        if (!$product) {
+            continue;
+        }
+
+        if ($offers_only && !$product->is_on_sale()) {
+            continue;
+        }
+
+        $products[] = $product;
+    }
+
+    harriet_unified_sort_product_objects($products, $orderby, $order);
+
+    return $products;
+}
+
 function harriet_unified_build_product_response($product, $vendor_store_cache) {
     $pid = $product->get_id();
     $seller_id = function_exists('dokan_get_vendor_by_product') ? dokan_get_vendor_by_product($pid, true) : 0;
@@ -180,6 +324,9 @@ add_action('rest_api_init', function () {
             'minPrice'     => array('type' => 'numeric', 'default' => 0),
             'maxPrice'     => array('type' => 'numeric', 'default' => null),
             'stock_status' => array('type' => 'string', 'default' => 'all', 'enum' => array('all', 'instock', 'outofstock')),
+            'offers_only'  => array('type' => 'boolean', 'default' => false),
+            'orderby'      => array('type' => 'string', 'default' => 'date', 'enum' => array('date', 'name', 'title', 'price', 'offers')),
+            'order'        => array('type' => 'string', 'default' => 'DESC', 'enum' => array('ASC', 'DESC')),
             'shuffle'      => array('type' => 'boolean', 'default' => false),
         ),
     ));
@@ -192,6 +339,9 @@ function harriet_unified_fetch_products_by_category($request) {
     $minPrice      = floatval($request['minPrice']);
     $maxPrice      = isset($request['maxPrice']) && $request['maxPrice'] !== '' ? floatval($request['maxPrice']) : null;
     $stock_status  = $request['stock_status'];
+    $offers_only   = rest_sanitize_boolean($request->get_param('offers_only'));
+    $orderby       = $request->get_param('orderby');
+    $order         = strtoupper($request->get_param('order')) === 'ASC' ? 'ASC' : 'DESC';
     $shuffle       = (bool) $request->get_param('shuffle');
 
     $category = function_exists('harriet_find_best_matching_term')
@@ -202,7 +352,7 @@ function harriet_unified_fetch_products_by_category($request) {
         return new WP_Error('no_category', 'Category not found', array('status' => 404));
     }
 
-    $cache_key = 'harriet_cat_' . md5($category->slug . $page . $per_page . $minPrice . $maxPrice . $stock_status);
+    $cache_key = 'harriet_cat_' . md5($category->slug . $page . $per_page . $minPrice . $maxPrice . $stock_status . (int) $offers_only . $orderby . $order);
 
     if (!$shuffle) {
         $cached = wp_cache_get($cache_key, 'harriet');
@@ -223,7 +373,7 @@ function harriet_unified_fetch_products_by_category($request) {
 
     $args = array(
         'post_type' => 'product', 'post_status' => 'publish',
-        'author__in' => $enabled_vendors, 'posts_per_page' => $per_page, 'paged' => $page,
+        'author__in' => $enabled_vendors,
         'tax_query' => array(array('taxonomy' => 'product_cat', 'field' => 'term_id', 'terms' => (int) $category->term_id)),
     );
 
@@ -238,28 +388,38 @@ function harriet_unified_fetch_products_by_category($request) {
     }
     $args['meta_query'] = $meta_query;
 
-    $query = new WP_Query($args);
-    $total = $query->found_posts;
+    $products = harriet_unified_collect_products($args, $offers_only, $orderby, $order);
+    $total = count($products);
 
-    if (!$query->have_posts()) {
-        wp_reset_postdata();
+    if ($total === 0) {
         return new WP_Error('no_products', 'No products found', array('status' => 404));
     }
 
-    $vendor_map = array();
-    foreach ($query->posts as $post) $vendor_map[$post->ID] = $post->post_author;
-    $vendor_store_cache = harriet_unified_batch_load_vendor_stores($vendor_map);
+    if ($shuffle) {
+        shuffle($products);
+    }
+
+    $offset = ($page - 1) * $per_page;
+    $paged_products = array_slice($products, $offset, $per_page);
+
+    if (empty($paged_products)) {
+        return new WP_Error('no_products', 'No products found', array('status' => 404));
+    }
+
+    $vendor_ids = array();
+    foreach ($paged_products as $product) {
+        $seller_id = function_exists('dokan_get_vendor_by_product') ? dokan_get_vendor_by_product($product->get_id(), true) : 0;
+        if ($seller_id) {
+            $vendor_ids[] = $seller_id;
+        }
+    }
+
+    $vendor_store_cache = harriet_unified_batch_load_vendor_stores($vendor_ids);
 
     $products_data = array();
-    while ($query->have_posts()) {
-        $query->the_post();
-        $product = wc_get_product(get_the_ID());
-        if (!$product) continue;
+    foreach ($paged_products as $product) {
         $products_data[] = harriet_unified_build_product_response($product, $vendor_store_cache);
     }
-    wp_reset_postdata();
-
-    if ($shuffle) shuffle($products_data);
 
     if (!$shuffle) {
         wp_cache_set($cache_key, array('data' => $products_data, 'total' => $total), 'harriet', 5 * MINUTE_IN_SECONDS);
@@ -286,6 +446,9 @@ add_action('rest_api_init', function () {
             'minPrice'     => array('type' => 'numeric', 'default' => 0),
             'maxPrice'     => array('type' => 'numeric', 'default' => null),
             'stock_status' => array('type' => 'string', 'default' => 'all', 'enum' => array('all', 'instock', 'outofstock')),
+            'offers_only'  => array('type' => 'boolean', 'default' => false),
+            'orderby'      => array('type' => 'string', 'default' => 'date', 'enum' => array('date', 'name', 'title', 'price', 'offers')),
+            'order'        => array('type' => 'string', 'default' => 'DESC', 'enum' => array('ASC', 'DESC')),
             'shuffle'      => array('type' => 'boolean', 'default' => false),
         ),
     ));
@@ -298,6 +461,9 @@ function harriet_unified_fetch_products_by_tag($request) {
     $minPrice      = floatval($request['minPrice']);
     $maxPrice      = isset($request['maxPrice']) && $request['maxPrice'] !== '' ? floatval($request['maxPrice']) : null;
     $stock_status  = $request['stock_status'];
+    $offers_only   = rest_sanitize_boolean($request->get_param('offers_only'));
+    $orderby       = $request->get_param('orderby');
+    $order         = strtoupper($request->get_param('order')) === 'ASC' ? 'ASC' : 'DESC';
     $shuffle       = (bool) $request->get_param('shuffle');
 
     $tag = function_exists('harriet_find_best_matching_term')
@@ -308,7 +474,7 @@ function harriet_unified_fetch_products_by_tag($request) {
         return new WP_Error('no_tag', 'Tag not found', array('status' => 404));
     }
 
-    $cache_key = 'harriet_tag_' . md5($tag->slug . $page . $per_page . $minPrice . $maxPrice . $stock_status);
+    $cache_key = 'harriet_tag_' . md5($tag->slug . $page . $per_page . $minPrice . $maxPrice . $stock_status . (int) $offers_only . $orderby . $order);
 
     if (!$shuffle) {
         $cached = wp_cache_get($cache_key, 'harriet');
@@ -329,7 +495,7 @@ function harriet_unified_fetch_products_by_tag($request) {
 
     $args = array(
         'post_type' => 'product', 'post_status' => 'publish',
-        'author__in' => $enabled_vendors, 'posts_per_page' => $per_page, 'paged' => $page,
+        'author__in' => $enabled_vendors,
         'tax_query' => array(array('taxonomy' => 'product_tag', 'field' => 'term_id', 'terms' => (int) $tag->term_id)),
     );
 
@@ -344,28 +510,38 @@ function harriet_unified_fetch_products_by_tag($request) {
     }
     $args['meta_query'] = $meta_query;
 
-    $query = new WP_Query($args);
-    $total = $query->found_posts;
+    $products = harriet_unified_collect_products($args, $offers_only, $orderby, $order);
+    $total = count($products);
 
-    if (!$query->have_posts()) {
-        wp_reset_postdata();
+    if ($total === 0) {
         return new WP_Error('no_products', 'No products found', array('status' => 404));
     }
 
-    $vendor_map = array();
-    foreach ($query->posts as $post) $vendor_map[$post->ID] = $post->post_author;
-    $vendor_store_cache = harriet_unified_batch_load_vendor_stores($vendor_map);
+    if ($shuffle) {
+        shuffle($products);
+    }
+
+    $offset = ($page - 1) * $per_page;
+    $paged_products = array_slice($products, $offset, $per_page);
+
+    if (empty($paged_products)) {
+        return new WP_Error('no_products', 'No products found', array('status' => 404));
+    }
+
+    $vendor_ids = array();
+    foreach ($paged_products as $product) {
+        $seller_id = function_exists('dokan_get_vendor_by_product') ? dokan_get_vendor_by_product($product->get_id(), true) : 0;
+        if ($seller_id) {
+            $vendor_ids[] = $seller_id;
+        }
+    }
+
+    $vendor_store_cache = harriet_unified_batch_load_vendor_stores($vendor_ids);
 
     $products_data = array();
-    while ($query->have_posts()) {
-        $query->the_post();
-        $product = wc_get_product(get_the_ID());
-        if (!$product) continue;
+    foreach ($paged_products as $product) {
         $products_data[] = harriet_unified_build_product_response($product, $vendor_store_cache);
     }
-    wp_reset_postdata();
-
-    if ($shuffle) shuffle($products_data);
 
     if (!$shuffle) {
         wp_cache_set($cache_key, array('data' => $products_data, 'total' => $total), 'harriet', 5 * MINUTE_IN_SECONDS);
