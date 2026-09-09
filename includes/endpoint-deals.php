@@ -100,12 +100,37 @@ function harriet_get_active_deals($request) {
 
     // Sale condition: simple products with a direct _sale_price, OR variable
     // products that have at least one variation child with a _sale_price.
+    // Date-window condition mirroring WooCommerce's own is_on_sale() check —
+    // applied unconditionally (not just when the client passes date_from/date_to)
+    // so the SQL "on sale" universe used for COUNT()/LIMIT/OFFSET matches what
+    // is_on_sale() will actually accept later in PHP. Without this, a product
+    // whose sale hasn't started yet (or already ended but whose _sale_price
+    // meta hasn't been cleared by the hourly woocommerce_scheduled_sales cron
+    // yet) gets counted and paginated, then silently dropped in the hydration
+    // loop below — which can empty out an entire page and previously caused a
+    // spurious 404 on otherwise valid pages.
+    $date_window_sql = "
+        AND NOT EXISTS (
+            SELECT 1 FROM {$wpdb->postmeta} pm_dwf
+            WHERE pm_dwf.post_id = %1\$s AND pm_dwf.meta_key = '_sale_price_dates_from'
+              AND pm_dwf.meta_value != '' AND CAST(pm_dwf.meta_value AS UNSIGNED) > {$current_time}
+        )
+        AND NOT EXISTS (
+            SELECT 1 FROM {$wpdb->postmeta} pm_dwt
+            WHERE pm_dwt.post_id = %1\$s AND pm_dwt.meta_key = '_sale_price_dates_to'
+              AND pm_dwt.meta_value != '' AND CAST(pm_dwt.meta_value AS UNSIGNED) < {$current_time}
+        )
+    ";
+
     $sale_exists_subquery = "
         EXISTS (
             SELECT 1 FROM {$wpdb->postmeta} pm_s
+            INNER JOIN {$wpdb->postmeta} pm_r ON pm_r.post_id = pm_s.post_id AND pm_r.meta_key = '_regular_price' AND pm_r.meta_value != ''
             WHERE pm_s.post_id = p.ID
               AND pm_s.meta_key = '_sale_price'
               AND pm_s.meta_value != ''
+              AND CAST(pm_s.meta_value AS DECIMAL(10,2)) < CAST(pm_r.meta_value AS DECIMAL(10,2))
+              " . sprintf($date_window_sql, 'p.ID') . "
         )
         OR EXISTS (
             SELECT 1
@@ -116,6 +141,7 @@ function harriet_get_active_deals($request) {
               AND var.post_type   = 'product_variation'
               AND var.post_status = 'publish'
               AND CAST(pm_vs.meta_value AS DECIMAL(10,2)) < CAST(pm_vr.meta_value AS DECIMAL(10,2))
+              " . sprintf($date_window_sql, 'var.ID') . "
         )
     ";
     $where_clauses[] = "({$sale_exists_subquery})";
@@ -236,9 +262,9 @@ function harriet_get_active_deals($request) {
         $offset
     ));
 
-    if (empty($product_ids)) {
-        return new WP_Error('no_deals', 'No active deals found matching criteria', array('status' => 404));
-    }
+    // An empty slice here just means this page (within the reported total)
+    // has no qualifying rows — that's a valid, empty result, not an error.
+    // Returning 404 broke pagination for clients relying on X-WP-TotalPages.
 
     // --- Hydrate products — deduplicated by parent ID ---
     $fields_to_remove = array(
@@ -282,9 +308,10 @@ function harriet_get_active_deals($request) {
         $products[] = $formatted;
     }
 
-    if (empty($products)) {
-        return new WP_Error('no_deals', 'No active deals found matching criteria', array('status' => 404));
-    }
+    // As above: a page that hydrates to zero products (e.g. every row in this
+    // slice failed the is_on_sale() check despite matching the SQL filter) is
+    // a valid empty page, not a 404 — the client already knows the real
+    // total/total-pages from the headers below.
 
     wp_cache_set($cache_key, array('products' => $products, 'total' => $total), 'harriet', 15 * MINUTE_IN_SECONDS);
 
