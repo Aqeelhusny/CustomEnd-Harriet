@@ -74,7 +74,22 @@ function harriet_get_active_deals($request) {
     ");
 
     if (empty($enabled_sellers)) {
-        return new WP_Error('no_sellers', 'No enabled vendors found', array('status' => 404));
+        $response = new WP_REST_Response(array(), 200);
+        $response->header('X-WP-Total',      0);
+        $response->header('X-WP-TotalPages', 0);
+        $response->header('X-WP-Pages',      0);
+        return $response;
+    }
+
+    // A vendor_id filter that doesn't match an enabled seller can't match any
+    // rows — return an empty result instead of silently falling through to
+    // the unfiltered (all-vendors) query below.
+    if ($vendor_id && !in_array($vendor_id, $enabled_sellers)) {
+        $response = new WP_REST_Response(array(), 200);
+        $response->header('X-WP-Total',      0);
+        $response->header('X-WP-TotalPages', 0);
+        $response->header('X-WP-Pages',      0);
+        return $response;
     }
 
     $sellers_ids  = implode(',', array_map('intval', $enabled_sellers));
@@ -94,7 +109,7 @@ function harriet_get_active_deals($request) {
         "p.post_author IN ({$sellers_ids})",
     );
 
-    if ($vendor_id && in_array($vendor_id, $enabled_sellers)) {
+    if ($vendor_id) {
         $where_clauses[] = $wpdb->prepare("p.post_author = %d", $vendor_id);
     }
 
